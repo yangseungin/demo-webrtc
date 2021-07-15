@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Hello WebSocket</title>
+    <link href="/webjars/bootstrap/css/bootstrap.min.css" rel="stylesheet">
+    <script src="/webjars/jquery/jquery.min.js"></script>
+    <script src="/webjars/sockjs-client/sockjs.min.js"></script>
+    <script src="/webjars/stomp-websocket/stomp.min.js"></script>
+
+</head>
+<body>
+<div id="username-page">
+    <div class="username-page-container">
+        <h1 class="title">닉네임 입력</h1>
+        <form id="usernameForm" name="usernameForm">
+            <div class="form-group">
+                <input type="text" id="name" placeholder="Username"
+                       autocomplete="off" class="form-control"/>
+            </div>
+            <div class="form-group">
+                <button type="submit" class="accent username-submit">채팅 시작</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div id="chat-page" class="hidden">
+    <div class="chat-container">
+        <div class="chat-header">
+            <h2>채팅</h2>
+        </div>
+        <div class="connecting">Connecting...</div>
+        <ul id="messageArea"></ul>
+        <form id="messageForm" name="messageForm" nameForm="messageForm">
+            <div class="form-group">
+                <div class="input-group clearfix">
+                    <input type="text" id="message" placeholder="메세지 입력"
+                           autocomplete="off" class="form-control"/>
+                    <button type="submit" class="primary">전송</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+
+<div id="video-page" class="hidden">
+    <video id="localVideo" class="vid" width="300px" height="300px" autoplay muted playsinline></video>
+    <video id="localVideo2" class="vid" width="300px" height="300px" autoplay muted playsinline></video>
+    <div style="display:block">
+        <button id="startButton" class="settings" onclick="cameraOn()">화상 시작</button>
+        <button id="start" class="settings" onclick="videoConnection()">화상회의 시작</button>
+        <button id="vidButton" class="settings" onclick="toggleVideo()">Video Enabled</button>
+        <button id="shareButton" >화면 공유</button>
+        <br>
+    </div>
+</div>
+<script>
+    var usernamePage = document.querySelector('#username-page');
+    var chatPage = document.querySelector('#chat-page');
+    var videoPage = document.querySelector('#video-page');
+    var usernameForm = document.querySelector('#usernameForm');
+    var messageForm = document.querySelector('#messageForm');
+    var messageInput = document.querySelector('#message');
+    var messageArea = document.querySelector('#messageArea');
+    var connectingElement = document.querySelector('.connecting');
+
+    var stompClient = null;
+    var username = null;
+    var colors = [
+        '#2196F3', '#32c787', '#00BCD4', '#ff5652',
+        '#ffc107', '#ff85af', '#FF9800', '#39bbb0'
+    ];
+
+    function connect(event) {
+        username = document.querySelector('#name').value.trim();
+
+        if (username) {
+            usernamePage.classList.add('hidden');
+            chatPage.classList.remove('hidden');
+            videoPage.classList.remove('hidden');
+
+            let socket = new SockJS('/gs-guide-websocket');
+            stompClient = Stomp.over(socket);
+            stompClient.connect({}, onConnected, onError);
+
+        }
+
+        event.preventDefault();
+    }
+
+    function onConnected() {
+        stompClient.subscribe('/topic/public', onMessageReceived);
+
+        stompClient.send("/app/chat.register",
+            {},
+            JSON.stringify({sender: username, type: 'JOIN'})
+        )
+        connectingElement.classList.add('hidden');
+    }
+
+
+    function onError(error) {
+        connectingElement.textContent = 'Could not connect to WebSocket server. Please refresh this page to try again!';
+        connectingElement.style.color = 'red';
+    }
+
+
+    function send(event) {
+        var messageContent = messageInput.value.trim();
+
+        if (messageContent && stompClient) {
+            var chatMessage = {
+                sender: username,
+                content: messageInput.value,
+                type: 'CHAT'
+            };
+
+            stompClient.send("/app/chat.send", {}, JSON.stringify(chatMessage));
+            messageInput.value = '';
+        }
+        event.preventDefault();
+    }
+
+
+    function onMessageReceived(payload) {
+        var message = JSON.parse(payload.body);
+
+        var messageElement = document.createElement('li');
+
+        if (message.type === 'JOIN') {
+            messageElement.classList.add('event-message');
+            message.content = message.sender + ' 입장';
+        } else if (message.type === 'LEAVE') {
+            messageElement.classList.add('event-message');
+            message.content = message.sender + ' 퇴장';
+        } else {
+            messageElement.classList.add('chat-message');
+
+            var avatarElement = document.createElement('i');
+            var avatarText = document.createTextNode(message.sender[0]);
+            avatarElement.appendChild(avatarText);
+            avatarElement.style['background-color'] = getAvatarColor(message.sender);
+
+            messageElement.appendChild(avatarElement);
+
+            var usernameElement = document.createElement('span');
+            var usernameText = document.createTextNode(message.sender);
+            usernameElement.appendChild(usernameText);
+            messageElement.appendChild(usernameElement);
+        }
+
+        var textElement = document.createElement('p');
+        var messageText = document.createTextNode(message.content);
+        textElement.appendChild(messageText);
+
+        messageElement.appendChild(textElement);
+
+        messageArea.appendChild(messageElement);
+        messageArea.scrollTop = messageArea.scrollHeight;
+    }
+
+
+    function getAvatarColor(messageSender) {
+        var hash = 0;
+        for (var i = 0; i < messageSender.length; i++) {
+            hash = 31 * hash + messageSender.charCodeAt(i);
+        }
+
+        var index = Math.abs(hash % colors.length);
+        return colors[index];
+    }
+
+    usernameForm.addEventListener('submit', connect, true)
+    messageForm.addEventListener('submit', send, true)
+
+
+    function toggleVideo() {
+        for (let index in localStream.getVideoTracks()) {
+            localStream.getVideoTracks()[index].enabled = !localStream.getVideoTracks()[index].enabled
+            vidButton.innerText = localStream.getVideoTracks()[index].enabled ? "Video Enabled" : "Video Disabled"
+        }
+    }
+
+    const shareButton = document.getElementById('shareButton');
+    shareButton.addEventListener('click', () => {
+        navigator.mediaDevices.getDisplayMedia({audio: false, video: true})
+            .then(handleSuccess, handleError);
+    });
+
+    function shareScreen(stream) {
+        // shareButton.disabled = true;
+        const screen = document.getElementById("localVideo");
+        screen.srcObject = stream;
+
+    }
+    function handleSuccess(stream) {
+        // shareButton.disabled = true;
+        localStream = stream;
+        const screen = document.getElementById("localVideo");
+        screen.srcObject = stream;
+
+        stream.getVideoTracks()[0].addEventListener('ended', () => {
+            errorMsg('The user has ended sharing the screen');
+            startButton.disabled = false;
+        });
+    }
+
+    function handleError(error) {
+        errorMsg(`getDisplayMedia error: ${error.name}`, error);
+    }
+
+
+    var userid = Math.round(Math.random() * 1000)
+    var socketUrl = "ws://127.0.0.1:8080/msgServer/" + userid
+    var socket = null
+    var localStream = null
+    var pc = null
+
+    window.onload = function () {
+        console.log("My ID:" + userid);
+        socket = new WebSocket(socketUrl)
+        socket.onclose = function (e) {
+            console.log("Server is down" + e.code);
+        }
+        socket.onopen = function () {
+            console.log("Successful connection to server");
+        }
+        socket.onmessage = function (res) {
+            var obj = JSON.parse(res.data)
+            var type = obj.type
+            if (type === "offer") {
+                if (pc) {
+                    console.error('peerConnection Already exists!');
+                    return;
+                }
+                pc = InitPeerConnetion()
+                // console.log("get offer");
+                var rtcs = new RTCSessionDescription(obj)
+                pc.setRemoteDescription(rtcs)
+                // console.log("set remotedescription success");
+                pc.createAnswer(function (desc) {
+                    pc.setLocalDescription(desc)
+                    // console.log("send answer");
+                    // console.log(desc);
+                    socket.send(JSON.stringify(desc))
+                    // console.log("send answer success");
+                }, function () {
+                    // console.log("create answer fail");
+                })
+            } else if (type === "answer") {
+                if (!pc) {
+                    console.error('peerConnection Non-existent!');
+                    return;
+                }
+                var rtcs = new RTCSessionDescription(obj)
+                pc.setRemoteDescription(rtcs)
+            } else if (type === "candidate") {
+                var candidate = new RTCIceCandidate({
+                    sdpMLineIndex: obj.sdpMLineIndex,
+                    sdpMid: obj.sdpMid,
+                    candidate: obj.candidate
+                })
+                pc.addIceCandidate(candidate)
+            }
+        }
+    }
+
+    function videoConnection() {
+
+        // start.disabled = true;
+
+        pc = InitPeerConnetion()
+        pc.createOffer(function (desc) {
+            pc.setLocalDescription(desc)
+            var txt = JSON.stringify(desc)
+            socket.send(txt)
+        }, function (err) {
+            // console.log(err);
+        })
+    }
+
+    function InitPeerConnetion() {
+        var peerconntion = null
+        try {
+            peerconntion = new webkitRTCPeerConnection();
+        } catch (e) {
+            // console.log("connet fail");
+        }
+        peerconntion.onicecandidate = function (evt) {
+            if (evt.candidate) {
+                var txt = JSON.stringify({
+                    type: "candidate",
+                    sdpMid: evt.candidate.sdpMid,
+                    sdpMLineIndex: evt.candidate.sdpMLineIndex,
+                    candidate: evt.candidate.candidate
+                })
+                socket.send(txt)
+            }
+        }
+        peerconntion.addStream(localStream)
+        peerconntion.onaddstream = function (event) {
+            document.getElementById("localVideo2").srcObject = event.stream
+            document.getElementById("localVideo2").play()
+        };
+
+        return peerconntion
+    }
+
+    function cameraOn() {
+        // startButton.disabled = true;
+        navigator.webkitGetUserMedia({video: true, audio: false},
+            function (stream) {
+                localStream = stream
+                document.getElementById("localVideo").srcObject = stream;
+                let playPromise = document.getElementById("localVideo").play();
+                if (playPromise !== undefined) {
+                    playPromise.then(_ => {
+                    })
+                        .catch(() => {
+                        });
+                }
+            },
+            function (e) {
+                return;
+            }
+        )
+    }
+
+
+</script>
+</body>
+</html>
